@@ -61,4 +61,5 @@ except Exception as e:
     elif "Not a valid email" in err_msg:
         st.warning("診斷：Email 欄位填錯了。")
     elif "401" in err_msg or "invalid_grant" in err_msg:
+
         st.warning("診斷：401 錯誤。通常是 API 沒開，或是私鑰內容複製不完整。")
