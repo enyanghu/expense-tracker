@@ -1,26 +1,57 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+from google.oauth2 import service_account
+import gspread
 
 # --- 頁面設定 ---
 st.set_page_config(page_title="我的記帳本", page_icon="💰", layout="centered")
 st.title("💰 個人雲端記帳本")
 
-# --- 連接 Google Sheets ---
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(ttl="0")
-    
-    # 資料清理：移除全空的行，並確保金額是數字
-    df = df.dropna(how="all")
-    if "金額" in df.columns:
-        df["金額"] = pd.to_numeric(df["金額"], errors='coerce').fillna(0)
+# --- 核心：手動連接 Google Sheets (使用維修模式的成功邏輯) ---
+def load_data():
+    try:
+        # 1. 讀取 Secrets
+        info = st.secrets["connections"]["gsheets"]["service_account_info"]
+        url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+
+        # 2. 建立憑證 (跟維修模式一樣)
+        creds = service_account.Credentials.from_service_account_info(
+            info,
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+        )
+
+        # 3. 使用 gspread 連線 (這是更穩定的連線庫)
+        client = gspread.authorize(creds)
         
-except Exception as e:
-    st.error(f"資料庫連線失敗，請檢查 Secrets 設定。\n錯誤訊息: {e}")
-    st.stop()
+        # 4. 開啟試算表
+        sheet = client.open_by_url(url).sheet1 # 開啟第一個分頁
+        data = sheet.get_all_records()
+        
+        # 5. 轉換成 Pandas 表格
+        if not data:
+            # 如果是空的，建立一個空的 DataFrame
+            return sheet, pd.DataFrame(columns=["日期", "類別", "金額", "備註"])
+            
+        df = pd.DataFrame(data)
+        
+        # 資料清理
+        if "金額" in df.columns:
+            # 把 "$100" 或 "100" 統一轉成數字
+            df["金額"] = pd.to_numeric(df["金額"].astype(str).str.replace(r'[$,]', '', regex=True), errors='coerce').fillna(0)
+            
+        return sheet, df
+
+    except Exception as e:
+        st.error(f"❌ 連線失敗！\n錯誤訊息: {e}")
+        st.stop()
+
+# 載入資料
+sheet, df = load_data()
 
 # --- 分頁設計 ---
 tab1, tab2 = st.tabs(["➕ 新增支出", "📊 報表分析"])
@@ -41,20 +72,19 @@ with tab1:
         submitted = st.form_submit_button("💾 儲存紀錄", use_container_width=True)
 
     if submitted:
-        new_entry = pd.DataFrame([{
-            "日期": date.strftime("%Y-%m-%d"),
-            "類別": category,
-            "金額": amount,
-            "備註": note
-        }])
-        
         try:
-            updated_df = pd.concat([df, new_entry], ignore_index=True)
-            conn.update(data=updated_df)
-            st.success("✅ 記帳成功！已同步至 Google 試算表")
-            st.rerun()
+            # 準備要寫入的資料 (轉成 list)
+            date_str = date.strftime("%Y-%m-%d")
+            new_row = [date_str, category, amount, note]
+            
+            # 直接寫入 Google Sheet
+            sheet.append_row(new_row)
+            
+            st.success(f"✅ 成功記錄：{category} ${amount}")
+            st.rerun() # 重新整理頁面
+            
         except Exception as e:
-            st.error(f"儲存失敗，請稍後再試。錯誤: {e}")
+            st.error(f"寫入失敗: {e}")
 
 # === 分頁 2: 分析功能 ===
 with tab2:
@@ -73,8 +103,14 @@ with tab2:
         fig.update_traces(textposition='inside', textinfo='percent+label')
         st.plotly_chart(fig, use_container_width=True)
         
-        # 明細表
+        # 明細表 (依照日期排序)
         with st.expander("查看詳細明細列表"):
-            st.dataframe(df.sort_values(by="日期", ascending=False), use_container_width=True)
+            # 確保日期欄位也是日期格式，方便排序
+            df_sorted = df.copy()
+            try:
+                df_sorted = df_sorted.sort_values(by="日期", ascending=False)
+            except:
+                pass # 如果日期格式亂掉就不排序
+            st.dataframe(df_sorted, use_container_width=True)
     else:
         st.info("目前沒有資料，快去記下第一筆帳吧！")
