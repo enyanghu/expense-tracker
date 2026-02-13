@@ -106,7 +106,7 @@ with tab1:
             cat_options = ["飲食", "交通", "購物", "娛樂", "居住", "醫療", "投資", "其他"]
             db_type = "支出"
         else:
-            cat_options = ["薪水", "零用錢", "獎金", "投資獲利", "紅包", "其他收入"]
+            cat_options = ["薪水", "零用錢", "獎金", "二手交易", "紅包", "其他收入"]
             db_type = "收入"
             
         category = st.selectbox("分類", cat_options)
@@ -191,5 +191,6 @@ with tab2:
             st.dataframe(display_df, use_container_width=True)
     else:
         st.info("目前沒有資料，快去記下第一筆帳吧！")
+
 
 
