@@ -89,18 +89,19 @@ tab1, tab2 = st.tabs(["➕ 新增帳目", "📊 報表分析"])
 # === 分頁 1: 記帳 ===
 with tab1:
     st.subheader("輸入收支細項")
+    
+    # 🌟 關鍵修改：把這行移到 form 的外面！
+    # 這樣只要一按，網頁就會立刻刷新，下面的分類就會跟著改變
+    record_type = st.radio("類型", ["支出 💸", "收入 💰"], horizontal=True)
+    
     with st.form("entry_form", clear_on_submit=True):
-        
-        # 👇 新功能：收支切換
-        record_type = st.radio("類型", ["支出 💸", "收入 💰"], horizontal=True)
-        
         col1, col2 = st.columns(2)
         with col1:
             date_input = st.date_input("日期", datetime.now())
         with col2:
             amount = st.number_input("金額 ($)", min_value=0, step=10, value=100)
             
-        # 👇 新功能：根據類型改變分類選單
+        # 根據外面的類型改變分類選單
         if record_type == "支出 💸":
             cat_options = ["飲食", "交通", "購物", "娛樂", "居住", "醫療", "投資", "其他"]
             db_type = "支出"
@@ -115,11 +116,11 @@ with tab1:
 
     if submitted:
         date_str = date_input.strftime("%Y-%m-%d")
-        # 寫入包含「收支」的新欄位
         new_row = [date_str, db_type, category, amount, note]
         sheet.append_row(new_row)
         st.success(f"✅ 已記錄：{db_type} - {category} ${amount}")
         st.rerun()
+
 
 # === 分頁 2: 分析 (含結餘計算) ===
 with tab2:
@@ -194,3 +195,4 @@ with tab2:
             st.dataframe(display_df, use_container_width=True)
     else:
         st.info("目前沒有資料，快去記下第一筆帳吧！")
+
