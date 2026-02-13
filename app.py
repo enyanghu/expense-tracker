@@ -194,16 +194,3 @@ with tab2:
             st.dataframe(display_df, use_container_width=True)
     else:
         st.info("目前沒有資料，快去記下第一筆帳吧！")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("這個月還沒有支出紀錄喔！")
-
-        # --- 3. 全部明細 ---
-        with st.expander("查看所有歷史明細"):
-            # 顯示時把日期轉回字串比較好看
-            display_df = df.copy()
-            display_df["日期"] = display_df["日期"].dt.strftime("%Y-%m-%d")
-            st.dataframe(display_df.sort_values(by="日期", ascending=False), use_container_width=True)
-    else:
-        st.info("目前沒有資料，快去記下第一筆帳吧！")
-
