@@ -142,11 +142,7 @@ with tab2:
         col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
         col_metrics1.metric("本月收入", f"${month_income:,.0f}")
         col_metrics2.metric("本月支出", f"${month_expense:,.0f}")
-        # 結餘如果是正的會顯示綠色，負的會顯示紅色
-        col_metrics3.metric("本月結餘", f"${month_balance:,.0f}", delta=float(month_balance))
         
-        st.divider()
-
         # --- 2. 預算進度條 ---
         st.write("支出預算使用率：")
         percent = min(month_expense / monthly_budget, 1.0) if monthly_budget > 0 else 0
@@ -195,4 +191,5 @@ with tab2:
             st.dataframe(display_df, use_container_width=True)
     else:
         st.info("目前沒有資料，快去記下第一筆帳吧！")
+
 
