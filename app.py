@@ -32,25 +32,29 @@ def load_data(client, url):
         # 1. 處理記帳資料 (Sheet1)
         sheet1 = sh.sheet1
         data = sheet1.get_all_records()
+        
+        # ⚠️ 更新了預設欄位，加入 "收支"
         if not data:
-            df = pd.DataFrame(columns=["日期", "類別", "金額", "備註"])
+            df = pd.DataFrame(columns=["日期", "收支", "類別", "金額", "備註"])
         else:
             df = pd.DataFrame(data)
+            # 防呆：如果舊資料沒有收支欄位，自動補上並預設為支出
+            if "收支" not in df.columns:
+                df.insert(1, "收支", "支出")
+                
             if "金額" in df.columns:
                 df["金額"] = pd.to_numeric(df["金額"].astype(str).str.replace(r'[$,]', '', regex=True), errors='coerce').fillna(0)
             if "日期" in df.columns:
                 df["日期"] = pd.to_datetime(df["日期"], errors='coerce')
 
-        # 2. 處理預算資料 (嘗試讀取或建立 'budget' 分頁)
+        # 2. 處理預算資料
         try:
             budget_sheet = sh.worksheet("budget")
         except gspread.WorksheetNotFound:
-            # 如果沒有，自動建立一個
             budget_sheet = sh.add_worksheet(title="budget", rows=2, cols=2)
             budget_sheet.update(range_name="A1:B1", values=[["項目", "金額"]])
-            budget_sheet.update(range_name="A2:B2", values=[["每月預算", 20000]]) # 預設 20000
+            budget_sheet.update(range_name="A2:B2", values=[["每月預算", 20000]]) 
 
-        # 讀取預算金額
         try:
             budget_val = budget_sheet.cell(2, 2).value
             monthly_budget = int(budget_val) if budget_val else 20000
@@ -71,7 +75,7 @@ sheet, budget_sheet, df, monthly_budget = load_data(client, url)
 # --- 側邊欄：預算設定 ---
 with st.sidebar:
     st.header("⚙️ 設定")
-    st.write(f"目前每月預算：**${monthly_budget:,}**")
+    st.write(f"目前每月支出預算：**${monthly_budget:,}**")
     
     new_budget = st.number_input("修改預算金額", value=monthly_budget, step=1000)
     if st.button("更新預算"):
@@ -80,74 +84,116 @@ with st.sidebar:
         st.rerun()
 
 # --- 主畫面 ---
-tab1, tab2 = st.tabs(["➕ 新增支出", "📊 報表分析"])
+tab1, tab2 = st.tabs(["➕ 新增帳目", "📊 報表分析"])
 
 # === 分頁 1: 記帳 ===
 with tab1:
-    st.subheader("輸入支出細項")
+    st.subheader("輸入收支細項")
     with st.form("entry_form", clear_on_submit=True):
+        
+        # 👇 新功能：收支切換
+        record_type = st.radio("類型", ["支出 💸", "收入 💰"], horizontal=True)
+        
         col1, col2 = st.columns(2)
         with col1:
             date_input = st.date_input("日期", datetime.now())
         with col2:
             amount = st.number_input("金額 ($)", min_value=0, step=10, value=100)
             
-        category = st.selectbox("分類", ["飲食", "交通", "購物", "娛樂", "居住", "醫療", "投資", "其他"])
+        # 👇 新功能：根據類型改變分類選單
+        if record_type == "支出 💸":
+            cat_options = ["飲食", "交通", "購物", "娛樂", "居住", "醫療", "投資", "其他"]
+            db_type = "支出"
+        else:
+            cat_options = ["薪水", "零用錢", "獎金", "投資獲利", "紅包", "其他收入"]
+            db_type = "收入"
+            
+        category = st.selectbox("分類", cat_options)
         note = st.text_input("備註 (選填)")
         
         submitted = st.form_submit_button("💾 儲存紀錄", use_container_width=True)
 
     if submitted:
         date_str = date_input.strftime("%Y-%m-%d")
-        new_row = [date_str, category, amount, note]
+        # 寫入包含「收支」的新欄位
+        new_row = [date_str, db_type, category, amount, note]
         sheet.append_row(new_row)
-        st.success(f"✅ 已記錄：{category} ${amount}")
+        st.success(f"✅ 已記錄：{db_type} - {category} ${amount}")
         st.rerun()
 
-# === 分頁 2: 分析 (含預算條) ===
+# === 分頁 2: 分析 (含結餘計算) ===
 with tab2:
     st.subheader("本月收支概況")
     
     if not df.empty:
-        # 篩選「本月」的資料
         current_month = datetime.now().month
         current_year = datetime.now().year
         
-        # 確保日期欄位是 datetime 物件
         mask = (df['日期'].dt.month == current_month) & (df['日期'].dt.year == current_year)
         month_df = df.loc[mask]
         
-        month_total = month_df["金額"].sum()
+        # 👇 新功能：分離收入與支出並計算結餘
+        month_expense = month_df[month_df["收支"] == "支出"]["金額"].sum()
+        month_income = month_df[month_df["收支"] == "收入"]["金額"].sum()
+        month_balance = month_income - month_expense
         
-        # --- 1. 預算進度條 (這是新功能!) ---
-        col_metrics1, col_metrics2 = st.columns(2)
-        col_metrics1.metric("本月已花費", f"${month_total:,.0f}")
-        col_metrics2.metric("剩餘預算", f"${monthly_budget - month_total:,.0f}", 
-                           delta_color="normal" if monthly_budget >= month_total else "inverse")
+        # --- 1. 核心儀表板 ---
+        col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
+        col_metrics1.metric("本月收入", f"${month_income:,.0f}")
+        col_metrics2.metric("本月支出", f"${month_expense:,.0f}")
+        # 結餘如果是正的會顯示綠色，負的會顯示紅色
+        col_metrics3.metric("本月結餘", f"${month_balance:,.0f}", delta=float(month_balance))
         
-        # 計算百分比
-        percent = min(month_total / monthly_budget, 1.0)
+        st.divider()
+
+        # --- 2. 預算進度條 ---
+        st.write("支出預算使用率：")
+        percent = min(month_expense / monthly_budget, 1.0) if monthly_budget > 0 else 0
         bar_color = "red" if percent >= 1.0 else ("orange" if percent >= 0.8 else "green")
         
-        st.write("預算使用率：")
         st.progress(percent)
-        if percent >= 1.0:
-            st.error("⚠️ 注意：本月已超支！")
-        elif percent >= 0.8:
-            st.warning("⚠️ 警告：預算即將用盡！")
-        else:
-            st.caption("✅ 預算控制良好")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            if percent >= 1.0:
+                st.error("⚠️ 注意：本月已超支！")
+            elif percent >= 0.8:
+                st.warning("⚠️ 警告：預算即將用盡！")
+            else:
+                st.caption("✅ 預算控制良好")
+        with c2:
+            st.markdown(f"<div style='text-align: right;'>剩餘可用預算：<b>${monthly_budget - month_expense:,.0f}</b></div>", unsafe_allow_html=True)
 
         st.divider()
 
-        # --- 2. 圓餅圖 ---
-        if not month_df.empty:
-            pie_data = month_df.groupby("類別")["金額"].sum().reset_index()
+        # --- 3. 圓餅圖 (只分析支出) ---
+        expense_df = month_df[month_df["收支"] == "支出"]
+        if not expense_df.empty:
+            pie_data = expense_df.groupby("類別")["金額"].sum().reset_index()
             fig = px.pie(pie_data, values='金額', names='類別', 
                          title=f'{current_month} 月支出分佈', 
                          hole=0.4, 
                          color_discrete_sequence=px.colors.qualitative.Set3)
             fig.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("這個月還沒有支出紀錄喔！")
+
+        # --- 4. 全部明細 (加上完美編號排序) ---
+        with st.expander("查看所有歷史明細"):
+            display_df = df.copy()
+            display_df["日期"] = display_df["日期"].dt.strftime("%Y-%m-%d")
+            
+            # 依照日期排序，並將最新的排在上面
+            display_df = display_df.sort_values(by="日期", ascending=False)
+            
+            # 👇 套用我們之前討論的「編號重置魔法」
+            display_df = display_df.reset_index(drop=True)
+            display_df.index = display_df.index + 1
+            
+            st.dataframe(display_df, use_container_width=True)
+    else:
+        st.info("目前沒有資料，快去記下第一筆帳吧！")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("這個月還沒有支出紀錄喔！")
@@ -160,3 +206,4 @@ with tab2:
             st.dataframe(display_df.sort_values(by="日期", ascending=False), use_container_width=True)
     else:
         st.info("目前沒有資料，快去記下第一筆帳吧！")
+
